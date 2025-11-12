@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,11 +8,13 @@ import {
   FlatList,
   ActivityIndicator,
   TextInput,
+  Tabs,
 } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { db } from "@/lib/db";
 import { AppSchema } from "@/instant.schema";
 import { InstaQLEntity } from "@instantdb/react-native";
+import { useSemanticSearch } from "@/hooks/useSemanticSearch";
 
 type EntityType =
   | "bookings"
@@ -255,10 +257,13 @@ function DataViewer() {
   const insets = useSafeAreaInsets();
   const [selectedEntity, setSelectedEntity] = useState<EntityType>("bookings");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<"keyword" | "semantic">("keyword");
   const { items, isLoading, error } = useEntityData(selectedEntity);
+  const { performSearch, searchResults, isSearching } = useSemanticSearch();
+  const [semanticFilteredItems, setSemanticFilteredItems] = useState<any[]>([]);
 
-  // Filter items based on search query
-  const filteredItems = useMemo(() => {
+  // Keyword search - Filter items based on search query
+  const keywordFilteredItems = useMemo(() => {
     if (!searchQuery.trim()) return items;
 
     const query = searchQuery.toLowerCase();
@@ -270,6 +275,36 @@ function DataViewer() {
       });
     });
   }, [items, searchQuery]);
+
+  // Semantic search - Perform embeddings-based search
+  useEffect(() => {
+    if (searchMode === "semantic" && searchQuery.trim()) {
+      performSearch(searchQuery, selectedEntity, 10).then(() => {
+        // Results are available in searchResults
+      });
+    } else {
+      setSemanticFilteredItems([]);
+    }
+  }, [searchQuery, selectedEntity, searchMode, performSearch]);
+
+  // Map semantic search results to actual items
+  useEffect(() => {
+    if (searchResults.length > 0 && searchMode === "semantic") {
+      const resultIds = new Set(searchResults.map(r => r.entityId));
+      const filtered = items.filter(item => resultIds.has(item.id));
+      
+      // Sort by semantic search order
+      const sorted = searchResults
+        .map(result => filtered.find(item => item.id === result.entityId))
+        .filter(Boolean);
+      
+      setSemanticFilteredItems(sorted);
+    } else {
+      setSemanticFilteredItems([]);
+    }
+  }, [searchResults, items, searchMode]);
+
+  const filteredItems = searchMode === "semantic" ? semanticFilteredItems : keywordFilteredItems;
 
   const entities: EntityType[] = [
     "bookings",
@@ -335,15 +370,38 @@ function DataViewer() {
         </ScrollView>
       </View>
 
+      {/* Search Mode Tabs */}
+      <View style={styles.searchModeContainer}>
+        <Pressable
+          style={[styles.searchModeTab, searchMode === "keyword" && styles.searchModeTabActive]}
+          onPress={() => setSearchMode("keyword")}
+        >
+          <Text style={[styles.searchModeTabText, searchMode === "keyword" && styles.searchModeTabTextActive]}>
+            Keyword
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.searchModeTab, searchMode === "semantic" && styles.searchModeTabActive]}
+          onPress={() => setSearchMode("semantic")}
+        >
+          <Text style={[styles.searchModeTabText, searchMode === "semantic" && styles.searchModeTabTextActive]}>
+            Semantic
+          </Text>
+        </Pressable>
+      </View>
+
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Search across all fields..."
+          placeholder={searchMode === "semantic" ? "Search by meaning..." : "Search across all fields..."}
           placeholderTextColor="#999"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
+        {(isSearching || (searchQuery.length > 0 && searchMode === "semantic")) && (
+          <ActivityIndicator size="small" color="#000" style={{ marginRight: 8 }} />
+        )}
         {searchQuery.length > 0 && (
           <Pressable onPress={() => setSearchQuery("")} style={styles.clearButton}>
             <Text style={styles.clearButtonText}>✕</Text>
@@ -431,6 +489,36 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#000",
     marginBottom: 8,
+  },
+  searchModeContainer: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e5e5",
+    gap: 8,
+  },
+  searchModeTab: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: "#f5f5f5",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+  },
+  searchModeTabActive: {
+    backgroundColor: "#000",
+    borderColor: "#000",
+  },
+  searchModeTabText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#666",
+  },
+  searchModeTabTextActive: {
+    color: "#fff",
   },
   searchContainer: {
     flexDirection: "row",
