@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
+  TextInput,
 } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { db } from "@/lib/db";
@@ -253,7 +254,22 @@ function TableRow({
 function DataViewer() {
   const insets = useSafeAreaInsets();
   const [selectedEntity, setSelectedEntity] = useState<EntityType>("bookings");
+  const [searchQuery, setSearchQuery] = useState("");
   const { items, isLoading, error } = useEntityData(selectedEntity);
+
+  // Filter items based on search query
+  const filteredItems = useMemo(() => {
+    if (!searchQuery.trim()) return items;
+
+    const query = searchQuery.toLowerCase();
+    return items.filter((item) => {
+      // Search across all string and number fields
+      return Object.values(item).some((value) => {
+        if (value === null || value === undefined) return false;
+        return String(value).toLowerCase().includes(query);
+      });
+    });
+  }, [items, searchQuery]);
 
   const entities: EntityType[] = [
     "bookings",
@@ -297,7 +313,10 @@ function DataViewer() {
           {entities.map((entity) => (
             <Pressable
               key={entity}
-              onPress={() => setSelectedEntity(entity)}
+              onPress={() => {
+                setSelectedEntity(entity);
+                setSearchQuery("");
+              }}
               style={[
                 styles.selectorButton,
                 selectedEntity === entity && styles.selectorButtonActive,
@@ -314,6 +333,22 @@ function DataViewer() {
             </Pressable>
           ))}
         </ScrollView>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search across all fields..."
+          placeholderTextColor="#999"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery("")} style={styles.clearButton}>
+            <Text style={styles.clearButtonText}>✕</Text>
+          </Pressable>
+        )}
       </View>
 
       {/* Table */}
@@ -339,9 +374,9 @@ function DataViewer() {
           </View>
         )}
 
-        {!isLoading && !error && items.length > 0 && (
+        {!isLoading && !error && filteredItems.length > 0 && (
           <FlatList
-            data={items}
+            data={filteredItems}
             keyExtractor={(item) => item.id}
             renderItem={({ item, index }) => (
               <TableRow item={item} entity={selectedEntity} index={index} />
@@ -349,13 +384,19 @@ function DataViewer() {
             scrollEnabled={false}
           />
         )}
+
+        {!isLoading && !error && items.length > 0 && filteredItems.length === 0 && (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No results found for "{searchQuery}"</Text>
+          </View>
+        )}
       </View>
 
       {/* Footer */}
       {!isLoading && !error && items.length > 0 && (
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            Total: {items.length} {ENTITY_LABELS[selectedEntity].toLowerCase()}
+            {searchQuery ? `Found: ${filteredItems.length} / ${items.length}` : `Total: ${items.length}`} {ENTITY_LABELS[selectedEntity].toLowerCase()}
           </Text>
         </View>
       )}
@@ -390,6 +431,35 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#000",
     marginBottom: 8,
+  },
+  searchContainer: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e5e5",
+    alignItems: "center",
+  },
+  searchInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 6,
+    backgroundColor: "#f5f5f5",
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+    color: "#000",
+  },
+  clearButton: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  clearButtonText: {
+    fontSize: 18,
+    color: "#999",
+    fontWeight: "bold",
   },
   buttonGroup: {
     flexDirection: "row",
