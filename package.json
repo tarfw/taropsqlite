@@ -54,7 +54,7 @@
   },
   "op-sqlite": {
     "fts5": true,
-    "sqliteVec": true
+    "sqliteVec": false
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

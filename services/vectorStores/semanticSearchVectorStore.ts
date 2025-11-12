@@ -1,20 +1,102 @@
 import { RecursiveCharacterTextSplitter } from 'react-native-rag';
-import { OPSQLiteVectorStore } from '@react-native-rag/op-sqlite';
 import { ExecuTorchEmbeddings } from '@react-native-rag/executorch';
 import { ALL_MINILM_L6_V2 } from "react-native-executorch";
 
 /**
+ * In-memory semantic vector store with embeddings
+ * Uses cosine similarity for ranking results
+ */
+class InMemoryVectorStore {
+    private embeddings: ExecuTorchEmbeddings;
+    private vectors: Array<{
+        id: string;
+        text: string;
+        embedding: number[];
+        metadata: any;
+    }> = [];
+    private isLoaded = false;
+
+    constructor() {
+        this.embeddings = new ExecuTorchEmbeddings({
+            ...ALL_MINILM_L6_V2,
+            onDownloadProgress: (progress) => {
+                console.log("[VectorStore] All-MiniLM-L6-v2 model loading progress:", progress);
+            }
+        });
+    }
+
+    async load() {
+        if (this.isLoaded) return;
+        try {
+            await this.embeddings.embedQuery("test");
+            this.isLoaded = true;
+            console.log("[VectorStore] Model loaded successfully");
+        } catch (error) {
+            console.error("[VectorStore] Failed to load model:", error);
+            throw error;
+        }
+    }
+
+    async add({ document, metadata }: { document: string; metadata: any }) {
+        if (!this.isLoaded) {
+            throw new Error("Vector store not loaded. Call load() first.");
+        }
+        try {
+            const embedding = await this.embeddings.embedQuery(document);
+            const id = `${metadata.entityType}:${metadata.entityId}:${this.vectors.length}`;
+            this.vectors.push({
+                id,
+                text: document,
+                embedding,
+                metadata
+            });
+        } catch (error) {
+            console.error("[VectorStore] Error adding document:", error);
+            throw error;
+        }
+    }
+
+    async delete({ predicate }: { predicate: (record: any) => boolean }) {
+        this.vectors = this.vectors.filter(v => !predicate(v));
+    }
+
+    async query({ queryText }: { queryText: string }, limit = 10) {
+        if (!this.isLoaded) {
+            throw new Error("Vector store not loaded. Call load() first.");
+        }
+
+        try {
+            const queryEmbedding = await this.embeddings.embedQuery(queryText);
+            
+            // Calculate cosine similarity for all vectors
+            const results = this.vectors.map(vector => ({
+                ...vector,
+                similarity: this.cosineSimilarity(queryEmbedding, vector.embedding)
+            }))
+            .sort((a, b) => b.similarity - a.similarity)
+            .slice(0, limit);
+
+            return results;
+        } catch (error) {
+            console.error("[VectorStore] Error querying vectors:", error);
+            throw error;
+        }
+    }
+
+    private cosineSimilarity(a: number[], b: number[]): number {
+        const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
+        const magnitudeA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+        const magnitudeB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+        
+        if (magnitudeA === 0 || magnitudeB === 0) return 0;
+        return dotProduct / (magnitudeA * magnitudeB);
+    }
+}
+
+/**
  * Initialize the semantic vector store for entity data search
  */
-export const semanticVectorStore = new OPSQLiteVectorStore({
-    name: "entities_semantic_search",
-    embeddings: new ExecuTorchEmbeddings({
-        ...ALL_MINILM_L6_V2, 
-        onDownloadProgress: (progress) => {
-            console.log("[VectorStore] All-MiniLM-L6-v2 model loading progress:", progress);
-        }
-    }),
-});
+export const semanticVectorStore = new InMemoryVectorStore();
 
 /**
  * Convert entity data to string for embedding
